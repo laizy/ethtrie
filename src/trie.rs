@@ -21,7 +21,7 @@ pub struct PatriciaTrie<'db, D: HashDB> {
     root_hash: H256,
     db: &'db mut D,
     cache: RefCell<HashMap<H256, Vec<u8>>>,
-    passing_keys: RefCell<HashSet<H256>>,
+    passing_keys: HashSet<H256>,
     gen_keys: RefCell<HashSet<H256>>,
 }
 
@@ -166,7 +166,7 @@ impl<'db, D: HashDB> PatriciaTrie<'db, D> {
             root_hash: keccak256(&rlp::NULL_RLP.to_vec()),
 
             cache: RefCell::new(HashMap::new()),
-            passing_keys: RefCell::new(HashSet::new()),
+            passing_keys: HashSet::new(),
             gen_keys: RefCell::new(HashSet::new()),
 
             db,
@@ -181,7 +181,7 @@ impl<'db, D: HashDB> PatriciaTrie<'db, D> {
                     root_hash: root,
 
                     cache: RefCell::new(HashMap::new()),
-                    passing_keys: RefCell::new(HashSet::new()),
+                    passing_keys: HashSet::new(),
                     gen_keys: RefCell::new(HashSet::new()),
 
                     db,
@@ -312,7 +312,7 @@ impl<'db, D: HashDB> PatriciaTrie<'db, D> {
         }
     }
 
-    fn insert_at(&self, n: Node, partial: Nibbles, value: Vec<u8>) -> TrieResult<Node> {
+    fn insert_at(&mut self, n: Node, partial: Nibbles, value: Vec<u8>) -> TrieResult<Node> {
         match n {
             Node::Empty => Ok(Node::from_leaf(partial, value)),
             Node::Leaf(leaf) => {
@@ -402,14 +402,14 @@ impl<'db, D: HashDB> PatriciaTrie<'db, D> {
             Node::Hash(hash_node) => {
                 let borrow_hash_node = hash_node.borrow();
 
-                self.passing_keys.borrow_mut().insert(borrow_hash_node.hash);
+                self.passing_keys.insert(borrow_hash_node.hash);
                 let n = self.recover_from_db(&borrow_hash_node.hash)?;
                 self.insert_at(n, partial, value)
             }
         }
     }
 
-    fn delete_at(&self, n: Node, partial: &Nibbles) -> TrieResult<(Node, bool)> {
+    fn delete_at(&mut self, n: Node, partial: &Nibbles) -> TrieResult<(Node, bool)> {
         let (new_n, deleted) = match n {
             Node::Empty => Ok((Node::Empty, false)),
             Node::Leaf(leaf) => {
@@ -459,7 +459,7 @@ impl<'db, D: HashDB> PatriciaTrie<'db, D> {
             }
             Node::Hash(hash_node) => {
                 let hash = hash_node.borrow().hash.clone();
-                self.passing_keys.borrow_mut().insert(hash);
+                self.passing_keys.insert(hash);
 
                 let n = self.recover_from_db(&hash)?;
                 self.delete_at(n, partial)
@@ -473,7 +473,7 @@ impl<'db, D: HashDB> PatriciaTrie<'db, D> {
         }
     }
 
-    fn degenerate(&self, n: Node) -> TrieResult<Node> {
+    fn degenerate(&mut self, n: Node) -> TrieResult<Node> {
         match n {
             Node::Branch(branch) => {
                 let borrow_branch = branch.borrow();
@@ -524,7 +524,7 @@ impl<'db, D: HashDB> PatriciaTrie<'db, D> {
                     // try again after recovering node from the db.
                     Node::Hash(hash_node) => {
                         let hash = hash_node.borrow().hash.clone();
-                        self.passing_keys.borrow_mut().insert(hash.clone());
+                        self.passing_keys.insert(hash.clone());
 
                         let new_node = self.recover_from_db(&hash)?;
 
@@ -583,15 +583,15 @@ impl<'db, D: HashDB> PatriciaTrie<'db, D> {
         let root_hash = match encoded {
             RawNodeOrHash::Node(raw) => {
                 let hash = keccak256(&raw);
-                self.cache.borrow_mut().insert(hash.clone(), raw);
+                self.cache.get_mut().insert(hash.clone(), raw);
                 hash
             }
             RawNodeOrHash::Hash(hash) => hash,
         };
 
-        let mut keys = Vec::with_capacity(self.cache.borrow().len());
-        let mut values = Vec::with_capacity(self.cache.borrow().len());
-        for (k, v) in self.cache.borrow_mut().drain() {
+        let mut keys = Vec::with_capacity(self.cache.get_mut().len());
+        let mut values = Vec::with_capacity(self.cache.get_mut().len());
+        for (k, v) in self.cache.get_mut().drain() {
             keys.push(k);
             values.push(v);
         }
@@ -600,7 +600,6 @@ impl<'db, D: HashDB> PatriciaTrie<'db, D> {
 
         let removed_keys: Vec<H256> = self
             .passing_keys
-            .borrow()
             .iter()
             .filter(|h| !self.gen_keys.borrow().contains(h))
             .map(|h| *h)
@@ -609,8 +608,8 @@ impl<'db, D: HashDB> PatriciaTrie<'db, D> {
         self.db.remove_batch(&removed_keys);
 
         self.root_hash = root_hash;
-        self.gen_keys.borrow_mut().clear();
-        self.passing_keys.borrow_mut().clear();
+        self.gen_keys.get_mut().clear();
+        self.passing_keys.clear();
         self.root = self.recover_from_db(&root_hash)?;
         Ok(root_hash)
     }
