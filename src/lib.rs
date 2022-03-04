@@ -45,7 +45,7 @@ mod hasher;
 mod trie;
 
 pub use db::{HashDB, MemoryDB};
-pub use errors::{MemDBError, TrieError};
+pub use errors::TrieError;
 pub use trie::PatriciaTrie;
 
 pub use ethereum_types::H256;

@@ -174,7 +174,7 @@ impl<'db, D: HashDB> PatriciaTrie<'db, D> {
     }
 
     pub fn from(db: &'db mut D, root: H256) -> TrieResult<Self> {
-        match db.get(&root).map_err(|e| TrieError::DB(e.to_string()))? {
+        match db.get(&root) {
             Some(data) => {
                 let mut trie = Self {
                     root: Node::Empty,
@@ -262,7 +262,7 @@ impl<'db, D: HashDB> PatriciaTrie<'db, D> {
             let hash = keccak256(&node_encoded);
 
             if root_hash.eq(&hash) || node_encoded.len() >= HASH_LEN {
-                memdb.insert(hash, node_encoded).unwrap();
+                memdb.insert(hash, node_encoded);
             }
         }
         let trie = PatriciaTrie::from(&mut memdb, root_hash).or(Err(TrieError::InvalidProof))?;
@@ -596,9 +596,7 @@ impl<'db, D: HashDB> PatriciaTrie<'db, D> {
             values.push(v);
         }
 
-        self.db
-            .insert_batch(keys, values)
-            .map_err(|e| TrieError::DB(e.to_string()))?;
+        self.db.insert_batch(keys, values);
 
         let removed_keys: Vec<H256> = self
             .passing_keys
@@ -608,9 +606,7 @@ impl<'db, D: HashDB> PatriciaTrie<'db, D> {
             .map(|h| *h)
             .collect();
 
-        self.db
-            .remove_batch(&removed_keys)
-            .map_err(|e| TrieError::DB(e.to_string()))?;
+        self.db.remove_batch(&removed_keys);
 
         self.root_hash = root_hash;
         self.gen_keys.borrow_mut().clear();
@@ -733,7 +729,7 @@ impl<'db, D: HashDB> PatriciaTrie<'db, D> {
     }
 
     fn recover_from_db(&self, key: &H256) -> TrieResult<Node> {
-        match self.db.get(key).map_err(|e| TrieError::DB(e.to_string()))? {
+        match self.db.get(key) {
             Some(value) => Ok(self.decode_node(&value)?),
             None => Ok(Node::Empty),
         }
@@ -957,7 +953,7 @@ mod tests {
         trie.commit().unwrap();
 
         let empty_node_key = keccak256(&rlp::NULL_RLP);
-        let value = trie.db.get(&empty_node_key).unwrap().unwrap();
+        let value = trie.db.get(&empty_node_key).unwrap();
         assert_eq!(value, &rlp::NULL_RLP)
     }
 
