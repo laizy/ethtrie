@@ -1,68 +1,28 @@
+use ethereum_types::H256;
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::Arc;
 
+use crate::hasher::keccak256;
 use hashbrown::{HashMap, HashSet};
-use hasher::Hasher;
 use rlp::{Prototype, Rlp, RlpStream};
 
-use crate::db::{MemoryDB, DB};
+use crate::db::{HashDB, MemoryDB};
 use crate::errors::TrieError;
 use crate::nibbles::Nibbles;
-use crate::node::{empty_children, BranchNode, Node};
+use crate::node::{empty_children, BranchNode, Node, RawNodeOrHash};
 
 pub type TrieResult<T> = Result<T, TrieError>;
 
-pub trait Trie<D: DB, H: Hasher> {
-    /// Returns the value for key stored in the trie.
-    fn get(&self, key: &[u8]) -> TrieResult<Option<Vec<u8>>>;
-
-    /// Checks that the key is present in the trie
-    fn contains(&self, key: &[u8]) -> TrieResult<bool>;
-
-    /// Inserts value into trie and modifies it if it exists
-    fn insert(&mut self, key: Vec<u8>, value: Vec<u8>) -> TrieResult<()>;
-
-    /// Removes any existing value for key from the trie.
-    fn remove(&mut self, key: &[u8]) -> TrieResult<bool>;
-
-    /// Saves all the nodes in the db, clears the cache data, recalculates the root.
-    /// Returns the root hash of the trie.
-    fn root(&mut self) -> TrieResult<Vec<u8>>;
-
-    /// Prove constructs a merkle proof for key. The result contains all encoded nodes
-    /// on the path to the value at key. The value itself is also included in the last
-    /// node and can be retrieved by verifying the proof.
-    ///
-    /// If the trie does not contain a value for key, the returned proof contains all
-    /// nodes of the longest existing prefix of the key (at least the root node), ending
-    /// with the node that proves the absence of the key.
-    fn get_proof(&self, key: &[u8]) -> TrieResult<Vec<Vec<u8>>>;
-
-    /// return value if key exists, None if key not exist, Error if proof is wrong
-    fn verify_proof(
-        &self,
-        root_hash: Vec<u8>,
-        key: &[u8],
-        proof: Vec<Vec<u8>>,
-    ) -> TrieResult<Option<Vec<u8>>>;
-}
+const HASH_LEN: usize = 32;
 
 #[derive(Debug)]
-pub struct PatriciaTrie<D, H>
-where
-    D: DB,
-    H: Hasher,
-{
+pub struct PatriciaTrie<'db, D: HashDB> {
     root: Node,
-    root_hash: Vec<u8>,
-
-    db: Arc<D>,
-    hasher: Arc<H>,
-
-    cache: RefCell<HashMap<Vec<u8>, Vec<u8>>>,
-    passing_keys: RefCell<HashSet<Vec<u8>>>,
-    gen_keys: RefCell<HashSet<Vec<u8>>>,
+    root_hash: H256,
+    db: &'db mut D,
+    cache: RefCell<HashMap<H256, Vec<u8>>>,
+    passing_keys: RefCell<HashSet<H256>>,
+    gen_keys: RefCell<HashSet<H256>>,
 }
 
 #[derive(Clone, Debug)]
@@ -102,21 +62,13 @@ impl From<Node> for TraceNode {
     }
 }
 
-pub struct TrieIterator<'a, D, H>
-where
-    D: DB,
-    H: Hasher,
-{
-    trie: &'a PatriciaTrie<D, H>,
+pub struct TrieIterator<'a, 'db, D: HashDB> {
+    trie: &'a PatriciaTrie<'db, D>,
     nibble: Nibbles,
     nodes: Vec<TraceNode>,
 }
 
-impl<'a, D, H> Iterator for TrieIterator<'a, D, H>
-where
-    D: DB,
-    H: Hasher,
-{
+impl<'a, 'db, D: HashDB> Iterator for TrieIterator<'a, 'db, D> {
     type Item = (Vec<u8>, Vec<u8>);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -198,12 +150,8 @@ where
     }
 }
 
-impl<D, H> PatriciaTrie<D, H>
-where
-    D: DB,
-    H: Hasher,
-{
-    pub fn iter(&self) -> TrieIterator<D, H> {
+impl<'db, D: HashDB> PatriciaTrie<'db, D> {
+    pub fn iter(&self) -> TrieIterator<D> {
         let mut nodes = Vec::new();
         nodes.push((self.root.clone()).into());
         TrieIterator {
@@ -212,33 +160,31 @@ where
             nodes,
         }
     }
-    pub fn new(db: Arc<D>, hasher: Arc<H>) -> Self {
+    pub fn new(db: &'db mut D) -> Self {
         Self {
             root: Node::Empty,
-            root_hash: hasher.digest(&rlp::NULL_RLP.to_vec()),
+            root_hash: keccak256(&rlp::NULL_RLP.to_vec()),
 
             cache: RefCell::new(HashMap::new()),
             passing_keys: RefCell::new(HashSet::new()),
             gen_keys: RefCell::new(HashSet::new()),
 
             db,
-            hasher,
         }
     }
 
-    pub fn from(db: Arc<D>, hasher: Arc<H>, root: &[u8]) -> TrieResult<Self> {
+    pub fn from(db: &'db mut D, root: H256) -> TrieResult<Self> {
         match db.get(&root).map_err(|e| TrieError::DB(e.to_string()))? {
             Some(data) => {
                 let mut trie = Self {
                     root: Node::Empty,
-                    root_hash: root.to_vec(),
+                    root_hash: root,
 
                     cache: RefCell::new(HashMap::new()),
                     passing_keys: RefCell::new(HashSet::new()),
                     gen_keys: RefCell::new(HashSet::new()),
 
                     db,
-                    hasher,
                 };
 
                 trie.root = trie.decode_node(&data)?;
@@ -249,25 +195,21 @@ where
     }
 }
 
-impl<D, H> Trie<D, H> for PatriciaTrie<D, H>
-where
-    D: DB,
-    H: Hasher,
-{
+impl<'db, D: HashDB> PatriciaTrie<'db, D> {
     /// Returns the value for key stored in the trie.
-    fn get(&self, key: &[u8]) -> TrieResult<Option<Vec<u8>>> {
+    pub fn get(&self, key: &[u8]) -> TrieResult<Option<Vec<u8>>> {
         self.get_at(self.root.clone(), &Nibbles::from_raw(key.to_vec(), true))
     }
 
     /// Checks that the key is present in the trie
-    fn contains(&self, key: &[u8]) -> TrieResult<bool> {
+    pub fn contains(&self, key: &[u8]) -> TrieResult<bool> {
         Ok(self
             .get_at(self.root.clone(), &Nibbles::from_raw(key.to_vec(), true))?
             .map_or(false, |_| true))
     }
 
     /// Inserts value into trie and modifies it if it exists
-    fn insert(&mut self, key: Vec<u8>, value: Vec<u8>) -> TrieResult<()> {
+    pub fn insert(&mut self, key: Vec<u8>, value: Vec<u8>) -> TrieResult<()> {
         if value.is_empty() {
             self.remove(&key)?;
             return Ok(());
@@ -278,7 +220,7 @@ where
     }
 
     /// Removes any existing value for key from the trie.
-    fn remove(&mut self, key: &[u8]) -> TrieResult<bool> {
+    pub fn remove(&mut self, key: &[u8]) -> TrieResult<bool> {
         let (n, removed) =
             self.delete_at(self.root.clone(), &Nibbles::from_raw(key.to_vec(), true))?;
         self.root = n;
@@ -287,7 +229,7 @@ where
 
     /// Saves all the nodes in the db, clears the cache data, recalculates the root.
     /// Returns the root hash of the trie.
-    fn root(&mut self) -> TrieResult<Vec<u8>> {
+    pub fn root(&mut self) -> TrieResult<H256> {
         self.commit()
     }
 
@@ -298,7 +240,7 @@ where
     /// If the trie does not contain a value for key, the returned proof contains all
     /// nodes of the longest existing prefix of the key (at least the root node), ending
     /// with the node that proves the absence of the key.
-    fn get_proof(&self, key: &[u8]) -> TrieResult<Vec<Vec<u8>>> {
+    pub fn get_proof(&self, key: &[u8]) -> TrieResult<Vec<Vec<u8>>> {
         let mut path =
             self.get_path_at(self.root.clone(), &Nibbles::from_raw(key.to_vec(), true))?;
         match self.root {
@@ -309,31 +251,26 @@ where
     }
 
     /// return value if key exists, None if key not exist, Error if proof is wrong
-    fn verify_proof(
+    pub fn verify_proof(
         &self,
-        root_hash: Vec<u8>,
+        root_hash: H256,
         key: &[u8],
         proof: Vec<Vec<u8>>,
     ) -> TrieResult<Option<Vec<u8>>> {
-        let memdb = Arc::new(MemoryDB::new(true));
+        let mut memdb = MemoryDB::new(true);
         for node_encoded in proof.into_iter() {
-            let hash = self.hasher.digest(&node_encoded);
+            let hash = keccak256(&node_encoded);
 
-            if root_hash.eq(&hash) || node_encoded.len() >= H::LENGTH {
+            if root_hash.eq(&hash) || node_encoded.len() >= HASH_LEN {
                 memdb.insert(hash, node_encoded).unwrap();
             }
         }
-        let trie = PatriciaTrie::from(memdb, Arc::clone(&self.hasher), &root_hash)
-            .or(Err(TrieError::InvalidProof))?;
+        let trie = PatriciaTrie::from(&mut memdb, root_hash).or(Err(TrieError::InvalidProof))?;
         trie.get(key).or(Err(TrieError::InvalidProof))
     }
 }
 
-impl<D, H> PatriciaTrie<D, H>
-where
-    D: DB,
-    H: Hasher,
-{
+impl<'db, D: HashDB> PatriciaTrie<'db, D> {
     fn get_at(&self, n: Node, partial: &Nibbles) -> TrieResult<Option<Vec<u8>>> {
         match n {
             Node::Empty => Ok(None),
@@ -465,9 +402,7 @@ where
             Node::Hash(hash_node) => {
                 let borrow_hash_node = hash_node.borrow();
 
-                self.passing_keys
-                    .borrow_mut()
-                    .insert(borrow_hash_node.hash.to_vec());
+                self.passing_keys.borrow_mut().insert(borrow_hash_node.hash);
                 let n = self.recover_from_db(&borrow_hash_node.hash)?;
                 self.insert_at(n, partial, value)
             }
@@ -524,7 +459,7 @@ where
             }
             Node::Hash(hash_node) => {
                 let hash = hash_node.borrow().hash.clone();
-                self.passing_keys.borrow_mut().insert(hash.clone());
+                self.passing_keys.borrow_mut().insert(hash);
 
                 let n = self.recover_from_db(&hash)?;
                 self.delete_at(n, partial)
@@ -643,20 +578,21 @@ where
         }
     }
 
-    fn commit(&mut self) -> TrieResult<Vec<u8>> {
+    fn commit(&mut self) -> TrieResult<H256> {
         let encoded = self.encode_node(self.root.clone());
-        let root_hash = if encoded.len() < H::LENGTH {
-            let hash = self.hasher.digest(&encoded);
-            self.cache.borrow_mut().insert(hash.clone(), encoded);
-            hash
-        } else {
-            encoded
+        let root_hash = match encoded {
+            RawNodeOrHash::Node(raw) => {
+                let hash = keccak256(&raw);
+                self.cache.borrow_mut().insert(hash.clone(), raw);
+                hash
+            }
+            RawNodeOrHash::Hash(hash) => hash,
         };
 
         let mut keys = Vec::with_capacity(self.cache.borrow().len());
         let mut values = Vec::with_capacity(self.cache.borrow().len());
         for (k, v) in self.cache.borrow_mut().drain() {
-            keys.push(k.to_vec());
+            keys.push(k);
             values.push(v);
         }
 
@@ -664,42 +600,42 @@ where
             .insert_batch(keys, values)
             .map_err(|e| TrieError::DB(e.to_string()))?;
 
-        let removed_keys: Vec<Vec<u8>> = self
+        let removed_keys: Vec<H256> = self
             .passing_keys
             .borrow()
             .iter()
-            .filter(|h| !self.gen_keys.borrow().contains(&h.to_vec()))
-            .map(|h| h.to_vec())
+            .filter(|h| !self.gen_keys.borrow().contains(h))
+            .map(|h| *h)
             .collect();
 
         self.db
             .remove_batch(&removed_keys)
             .map_err(|e| TrieError::DB(e.to_string()))?;
 
-        self.root_hash = root_hash.to_vec();
+        self.root_hash = root_hash;
         self.gen_keys.borrow_mut().clear();
         self.passing_keys.borrow_mut().clear();
         self.root = self.recover_from_db(&root_hash)?;
         Ok(root_hash)
     }
 
-    fn encode_node(&self, n: Node) -> Vec<u8> {
+    fn encode_node(&self, n: Node) -> RawNodeOrHash {
         // Returns the hash value directly to avoid double counting.
         if let Node::Hash(hash_node) = n {
-            return hash_node.borrow().hash.clone();
+            return RawNodeOrHash::Hash(hash_node.borrow().hash.clone());
         }
 
         let data = self.encode_raw(n.clone());
         // Nodes smaller than 32 bytes are stored inside their parent,
         // Nodes equal to 32 bytes are returned directly
-        if data.len() < H::LENGTH {
-            data
+        if data.len() < HASH_LEN {
+            RawNodeOrHash::Node(data)
         } else {
-            let hash = self.hasher.digest(&data);
-            self.cache.borrow_mut().insert(hash.clone(), data);
+            let hash = keccak256(&data);
+            self.cache.borrow_mut().insert(hash, data);
 
-            self.gen_keys.borrow_mut().insert(hash.clone());
-            hash
+            self.gen_keys.borrow_mut().insert(hash);
+            RawNodeOrHash::Hash(hash)
         }
     }
 
@@ -721,11 +657,10 @@ where
                 for i in 0..16 {
                     let n = borrow_branch.children[i].clone();
                     let data = self.encode_node(n);
-                    if data.len() == H::LENGTH {
-                        stream.append(&data);
-                    } else {
-                        stream.append_raw(&data, 1);
-                    }
+                    match data {
+                        RawNodeOrHash::Hash(data) => stream.append(&data.as_bytes()),
+                        RawNodeOrHash::Node(data) => stream.append_raw(&data, 1),
+                    };
                 }
 
                 match &borrow_branch.value {
@@ -740,11 +675,11 @@ where
                 let mut stream = RlpStream::new_list(2);
                 stream.append(&borrow_ext.prefix.encode_compact());
                 let data = self.encode_node(borrow_ext.node.clone());
-                if data.len() == H::LENGTH {
-                    stream.append(&data);
-                } else {
-                    stream.append_raw(&data, 1);
-                }
+                match data {
+                    RawNodeOrHash::Hash(data) => stream.append(&data.as_bytes()),
+                    RawNodeOrHash::Node(data) => stream.append_raw(&data, 1),
+                };
+
                 stream.out()
             }
             Node::Hash(_hash) => unreachable!(),
@@ -788,8 +723,8 @@ where
                 Ok(Node::from_branch(nodes, value))
             }
             _ => {
-                if r.is_data() && r.size() == H::LENGTH {
-                    Ok(Node::from_hash(r.data()?.to_vec()))
+                if r.is_data() && r.size() == HASH_LEN {
+                    Ok(Node::from_hash(H256::from_slice(&r.data().unwrap())))
                 } else {
                     Err(TrieError::InvalidData)
                 }
@@ -797,7 +732,7 @@ where
         }
     }
 
-    fn recover_from_db(&self, key: &[u8]) -> TrieResult<Node> {
+    fn recover_from_db(&self, key: &H256) -> TrieResult<Node> {
         match self.db.get(key).map_err(|e| TrieError::DB(e.to_string()))? {
             Some(value) => Ok(self.decode_node(&value)?),
             None => Ok(Node::Empty),
@@ -811,25 +746,23 @@ mod tests {
     use rand::seq::SliceRandom;
     use rand::{thread_rng, Rng};
     use std::collections::{HashMap, HashSet};
-    use std::sync::Arc;
 
+    use super::PatriciaTrie;
+    use crate::db::{HashDB, MemoryDB};
+    use crate::hasher::keccak256;
     use ethereum_types;
-    use hasher::{Hasher, HasherKeccak};
-
-    use super::{PatriciaTrie, Trie};
-    use crate::db::{MemoryDB, DB};
 
     #[test]
     fn test_trie_insert() {
-        let memdb = Arc::new(MemoryDB::new(true));
-        let mut trie = PatriciaTrie::new(memdb, Arc::new(HasherKeccak::new()));
+        let mut memdb = MemoryDB::new(true);
+        let mut trie = PatriciaTrie::new(&mut memdb);
         trie.insert(b"test".to_vec(), b"test".to_vec()).unwrap();
     }
 
     #[test]
     fn test_trie_get() {
-        let memdb = Arc::new(MemoryDB::new(true));
-        let mut trie = PatriciaTrie::new(memdb, Arc::new(HasherKeccak::new()));
+        let mut memdb = MemoryDB::new(true);
+        let mut trie = PatriciaTrie::new(&mut memdb);
         trie.insert(b"test".to_vec(), b"test".to_vec()).unwrap();
         let v = trie.get(b"test").unwrap();
 
@@ -838,8 +771,8 @@ mod tests {
 
     #[test]
     fn test_trie_random_insert() {
-        let memdb = Arc::new(MemoryDB::new(true));
-        let mut trie = PatriciaTrie::new(memdb, Arc::new(HasherKeccak::new()));
+        let mut memdb = MemoryDB::new(true);
+        let mut trie = PatriciaTrie::new(&mut memdb);
 
         for _ in 0..1000 {
             let rand_str: String = thread_rng().sample_iter(&Alphanumeric).take(30).collect();
@@ -853,8 +786,8 @@ mod tests {
 
     #[test]
     fn test_trie_contains() {
-        let memdb = Arc::new(MemoryDB::new(true));
-        let mut trie = PatriciaTrie::new(memdb, Arc::new(HasherKeccak::new()));
+        let mut memdb = MemoryDB::new(true);
+        let mut trie = PatriciaTrie::new(&mut memdb);
         trie.insert(b"test".to_vec(), b"test".to_vec()).unwrap();
         assert_eq!(true, trie.contains(b"test").unwrap());
         assert_eq!(false, trie.contains(b"test2").unwrap());
@@ -862,8 +795,8 @@ mod tests {
 
     #[test]
     fn test_trie_remove() {
-        let memdb = Arc::new(MemoryDB::new(true));
-        let mut trie = PatriciaTrie::new(memdb, Arc::new(HasherKeccak::new()));
+        let mut memdb = MemoryDB::new(true);
+        let mut trie = PatriciaTrie::new(&mut memdb);
         trie.insert(b"test".to_vec(), b"test".to_vec()).unwrap();
         let removed = trie.remove(b"test").unwrap();
         assert_eq!(true, removed)
@@ -871,8 +804,8 @@ mod tests {
 
     #[test]
     fn test_trie_random_remove() {
-        let memdb = Arc::new(MemoryDB::new(true));
-        let mut trie = PatriciaTrie::new(memdb, Arc::new(HasherKeccak::new()));
+        let mut memdb = MemoryDB::new(true);
+        let mut trie = PatriciaTrie::new(&mut memdb);
 
         for _ in 0..1000 {
             let rand_str: String = thread_rng().sample_iter(&Alphanumeric).take(30).collect();
@@ -886,9 +819,9 @@ mod tests {
 
     #[test]
     fn test_trie_from_root() {
-        let memdb = Arc::new(MemoryDB::new(true));
+        let mut memdb = MemoryDB::new(true);
         let root = {
-            let mut trie = PatriciaTrie::new(Arc::clone(&memdb), Arc::new(HasherKeccak::new()));
+            let mut trie = PatriciaTrie::new(&mut memdb);
             trie.insert(b"test".to_vec(), b"test".to_vec()).unwrap();
             trie.insert(b"test1".to_vec(), b"test".to_vec()).unwrap();
             trie.insert(b"test2".to_vec(), b"test".to_vec()).unwrap();
@@ -898,8 +831,7 @@ mod tests {
             trie.root().unwrap()
         };
 
-        let mut trie =
-            PatriciaTrie::from(Arc::clone(&memdb), Arc::new(HasherKeccak::new()), &root).unwrap();
+        let mut trie = PatriciaTrie::from(&mut memdb, root).unwrap();
         let v1 = trie.get(b"test33").unwrap();
         assert_eq!(Some(b"test".to_vec()), v1);
         let v2 = trie.get(b"test44").unwrap();
@@ -910,9 +842,9 @@ mod tests {
 
     #[test]
     fn test_trie_from_root_and_insert() {
-        let memdb = Arc::new(MemoryDB::new(true));
+        let mut memdb = MemoryDB::new(true);
         let root = {
-            let mut trie = PatriciaTrie::new(Arc::clone(&memdb), Arc::new(HasherKeccak::new()));
+            let mut trie = PatriciaTrie::new(&mut memdb);
             trie.insert(b"test".to_vec(), b"test".to_vec()).unwrap();
             trie.insert(b"test1".to_vec(), b"test".to_vec()).unwrap();
             trie.insert(b"test2".to_vec(), b"test".to_vec()).unwrap();
@@ -922,8 +854,7 @@ mod tests {
             trie.commit().unwrap()
         };
 
-        let mut trie =
-            PatriciaTrie::from(Arc::clone(&memdb), Arc::new(HasherKeccak::new()), &root).unwrap();
+        let mut trie = PatriciaTrie::from(&mut memdb, root).unwrap();
         trie.insert(b"test55".to_vec(), b"test55".to_vec()).unwrap();
         trie.commit().unwrap();
         let v = trie.get(b"test55").unwrap();
@@ -932,9 +863,9 @@ mod tests {
 
     #[test]
     fn test_trie_from_root_and_delete() {
-        let memdb = Arc::new(MemoryDB::new(true));
+        let mut memdb = MemoryDB::new(true);
         let root = {
-            let mut trie = PatriciaTrie::new(Arc::clone(&memdb), Arc::new(HasherKeccak::new()));
+            let mut trie = PatriciaTrie::new(&mut memdb);
             trie.insert(b"test".to_vec(), b"test".to_vec()).unwrap();
             trie.insert(b"test1".to_vec(), b"test".to_vec()).unwrap();
             trie.insert(b"test2".to_vec(), b"test".to_vec()).unwrap();
@@ -944,8 +875,7 @@ mod tests {
             trie.commit().unwrap()
         };
 
-        let mut trie =
-            PatriciaTrie::from(Arc::clone(&memdb), Arc::new(HasherKeccak::new()), &root).unwrap();
+        let mut trie = PatriciaTrie::from(&mut memdb, root).unwrap();
         let removed = trie.remove(b"test44").unwrap();
         assert_eq!(true, removed);
         let removed = trie.remove(b"test33").unwrap();
@@ -961,16 +891,16 @@ mod tests {
         let v: ethereum_types::H256 = 0x1234.into();
 
         let root1 = {
-            let memdb = Arc::new(MemoryDB::new(true));
-            let mut trie = PatriciaTrie::new(memdb, Arc::new(HasherKeccak::new()));
+            let mut memdb = MemoryDB::new(true);
+            let mut trie = PatriciaTrie::new(&mut memdb);
             trie.insert(k0.as_bytes().to_vec(), v.as_bytes().to_vec())
                 .unwrap();
             trie.root().unwrap()
         };
 
         let root2 = {
-            let memdb = Arc::new(MemoryDB::new(true));
-            let mut trie = PatriciaTrie::new(memdb, Arc::new(HasherKeccak::new()));
+            let mut memdb = MemoryDB::new(true);
+            let mut trie = PatriciaTrie::new(&mut memdb);
             trie.insert(k0.as_bytes().to_vec(), v.as_bytes().to_vec())
                 .unwrap();
             trie.insert(k1.as_bytes().to_vec(), v.as_bytes().to_vec())
@@ -981,19 +911,19 @@ mod tests {
         };
 
         let root3 = {
-            let memdb = Arc::new(MemoryDB::new(true));
-            let mut trie1 = PatriciaTrie::new(Arc::clone(&memdb), Arc::new(HasherKeccak::new()));
-            trie1
-                .insert(k0.as_bytes().to_vec(), v.as_bytes().to_vec())
-                .unwrap();
-            trie1
-                .insert(k1.as_bytes().to_vec(), v.as_bytes().to_vec())
-                .unwrap();
-            trie1.root().unwrap();
-            let root = trie1.root().unwrap();
-            let mut trie2 =
-                PatriciaTrie::from(Arc::clone(&memdb), Arc::new(HasherKeccak::new()), &root)
+            let mut memdb = MemoryDB::new(true);
+            let root = {
+                let mut trie1 = PatriciaTrie::new(&mut memdb);
+                trie1
+                    .insert(k0.as_bytes().to_vec(), v.as_bytes().to_vec())
                     .unwrap();
+                trie1
+                    .insert(k1.as_bytes().to_vec(), v.as_bytes().to_vec())
+                    .unwrap();
+                trie1.root().unwrap();
+                trie1.root().unwrap()
+            };
+            let mut trie2 = PatriciaTrie::from(&mut memdb, root).unwrap();
             trie2.remove(&k1.as_bytes().to_vec()).unwrap();
             trie2.root().unwrap()
         };
@@ -1004,13 +934,13 @@ mod tests {
 
     #[test]
     fn test_delete_stale_keys_with_random_insert_and_delete() {
-        let memdb = Arc::new(MemoryDB::new(true));
-        let mut trie = PatriciaTrie::new(memdb, Arc::new(HasherKeccak::new()));
+        let mut memdb = MemoryDB::new(true);
+        let mut trie = PatriciaTrie::new(&mut memdb);
 
         let mut rng = rand::thread_rng();
         let mut keys = vec![];
         for _ in 0..100 {
-            let random_bytes: Vec<u8> = (0..rng.gen_range(2, 30))
+            let random_bytes: Vec<u8> = (0..rng.gen_range(2, 30u8))
                 .map(|_| rand::random::<u8>())
                 .collect();
             trie.insert(random_bytes.clone(), random_bytes.clone())
@@ -1026,15 +956,15 @@ mod tests {
         }
         trie.commit().unwrap();
 
-        let empty_node_key = HasherKeccak::new().digest(&rlp::NULL_RLP);
-        let value = trie.db.get(empty_node_key.as_ref()).unwrap().unwrap();
+        let empty_node_key = keccak256(&rlp::NULL_RLP);
+        let value = trie.db.get(&empty_node_key).unwrap().unwrap();
         assert_eq!(value, &rlp::NULL_RLP)
     }
 
     #[test]
     fn insert_full_branch() {
-        let memdb = Arc::new(MemoryDB::new(true));
-        let mut trie = PatriciaTrie::new(memdb, Arc::new(HasherKeccak::new()));
+        let mut memdb = MemoryDB::new(true);
+        let mut trie = PatriciaTrie::new(&mut memdb);
 
         trie.insert(b"test".to_vec(), b"test".to_vec()).unwrap();
         trie.insert(b"test1".to_vec(), b"test".to_vec()).unwrap();
@@ -1050,8 +980,8 @@ mod tests {
 
     #[test]
     fn iterator_trie() {
-        let memdb = Arc::new(MemoryDB::new(true));
-        let mut root1;
+        let mut memdb = MemoryDB::new(true);
+        let root1;
         let mut kv = HashMap::new();
         kv.insert(b"test".to_vec(), b"test".to_vec());
         kv.insert(b"test1".to_vec(), b"test1".to_vec());
@@ -1063,7 +993,7 @@ mod tests {
         kv.insert(b"test23".to_vec(), b"test7".to_vec());
         kv.insert(b"test9".to_vec(), b"test8".to_vec());
         {
-            let mut trie = PatriciaTrie::new(memdb.clone(), Arc::new(HasherKeccak::new()));
+            let mut trie = PatriciaTrie::new(&mut memdb);
             let mut kv = kv.clone();
             kv.iter().for_each(|(k, v)| {
                 trie.insert(k.clone(), v.clone()).unwrap();
@@ -1076,7 +1006,7 @@ mod tests {
         }
 
         {
-            let mut trie = PatriciaTrie::new(memdb.clone(), Arc::new(HasherKeccak::new()));
+            let mut trie = PatriciaTrie::new(&mut memdb);
             let mut kv2 = HashMap::new();
             kv2.insert(b"test".to_vec(), b"test11".to_vec());
             kv2.insert(b"test1".to_vec(), b"test12".to_vec());
@@ -1108,7 +1038,7 @@ mod tests {
             assert!(kv2.is_empty());
         }
 
-        let trie = PatriciaTrie::from(memdb, Arc::new(HasherKeccak::new()), &root1).unwrap();
+        let trie = PatriciaTrie::from(&mut memdb, root1).unwrap();
         trie.iter()
             .for_each(|(k, v)| assert_eq!(kv.remove(&k).unwrap(), v));
         assert!(kv.is_empty());

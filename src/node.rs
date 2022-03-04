@@ -1,3 +1,4 @@
+use ethereum_types::H256;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -10,6 +11,11 @@ pub enum Node {
     Extension(Rc<RefCell<ExtensionNode>>),
     Branch(Rc<RefCell<BranchNode>>),
     Hash(Rc<RefCell<HashNode>>),
+}
+
+pub enum RawNodeOrHash {
+    Node(Vec<u8>),
+    Hash(H256),
 }
 
 impl Node {
@@ -28,7 +34,7 @@ impl Node {
         Node::Extension(ext)
     }
 
-    pub fn from_hash(hash: Vec<u8>) -> Self {
+    pub fn from_hash(hash: H256) -> Self {
         let hash_node = Rc::new(RefCell::new(HashNode { hash }));
         Node::Hash(hash_node)
     }
@@ -69,7 +75,7 @@ pub struct ExtensionNode {
 
 #[derive(Debug)]
 pub struct HashNode {
-    pub hash: Vec<u8>,
+    pub hash: H256,
 }
 
 pub fn empty_children() -> [Node; 16] {
