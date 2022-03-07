@@ -13,11 +13,11 @@ impl Nibbles {
         Nibbles { hex_data: hex }
     }
 
-    pub fn from_raw(raw: Vec<u8>, is_leaf: bool) -> Self {
+    pub fn from_raw(raw: &[u8], is_leaf: bool) -> Self {
         let mut hex_data = vec![];
-        for item in raw.into_iter() {
-            hex_data.push(item / 16);
-            hex_data.push(item % 16);
+        for item in raw {
+            hex_data.push(*item / 16);
+            hex_data.push(*item % 16);
         }
         if is_leaf {
             hex_data.push(16);
@@ -25,7 +25,7 @@ impl Nibbles {
         Nibbles { hex_data }
     }
 
-    pub fn from_compact(compact: Vec<u8>) -> Self {
+    pub fn from_compact(compact: &[u8]) -> Self {
         let mut hex = vec![];
         let flag = compact[0];
 
@@ -168,9 +168,9 @@ mod tests {
 
     #[test]
     fn test_nibble() {
-        let n = Nibbles::from_raw(b"key1".to_vec(), true);
+        let n = Nibbles::from_raw(b"key1", true);
         let compact = n.encode_compact();
-        let n2 = Nibbles::from_compact(compact);
+        let n2 = Nibbles::from_compact(&compact);
         let (raw, is_leaf) = n2.encode_raw();
         assert_eq!(is_leaf, true);
         assert_eq!(raw, b"key1");

@@ -159,10 +159,11 @@ impl<'db, D: HashDB> PatriciaTrie<'db, D> {
         nodes.push((self.root.clone()).into());
         TrieIterator {
             trie: self,
-            nibble: Nibbles::from_raw(Vec::new(), false),
+            nibble: Nibbles::from_raw(&[], false),
             nodes,
         }
     }
+
     pub fn new(db: &'db mut D) -> Self {
         Self {
             root: Node::Empty,
@@ -201,20 +202,20 @@ impl<'db, D: HashDB> PatriciaTrie<'db, D> {
 impl<'db, D: HashDB> PatriciaTrie<'db, D> {
     /// Returns the value for key stored in the trie.
     pub fn get(&self, key: &[u8]) -> TrieResult<Option<Vec<u8>>> {
-        self.get_at(self.root.clone(), &Nibbles::from_raw(key.to_vec(), true))
+        self.get_at(self.root.clone(), &Nibbles::from_raw(key, true))
     }
 
     /// Checks that the key is present in the trie
     pub fn contains(&self, key: &[u8]) -> TrieResult<bool> {
         Ok(self
-            .get_at(self.root.clone(), &Nibbles::from_raw(key.to_vec(), true))?
+            .get_at(self.root.clone(), &Nibbles::from_raw(key, true))?
             .map_or(false, |_| true))
     }
 
     /// Inserts value into trie and modifies it if it exists
-    pub fn insert(&mut self, key: Vec<u8>, value: Vec<u8>) -> TrieResult<()> {
+    pub fn insert(&mut self, key: &[u8], value: Vec<u8>) -> TrieResult<()> {
         if value.is_empty() {
-            self.remove(&key)?;
+            self.remove(key)?;
             return Ok(());
         }
         let root = self.root.clone();
@@ -224,16 +225,9 @@ impl<'db, D: HashDB> PatriciaTrie<'db, D> {
 
     /// Removes any existing value for key from the trie.
     pub fn remove(&mut self, key: &[u8]) -> TrieResult<bool> {
-        let (n, removed) =
-            self.delete_at(self.root.clone(), &Nibbles::from_raw(key.to_vec(), true))?;
+        let (n, removed) = self.delete_at(self.root.clone(), &Nibbles::from_raw(key, true))?;
         self.root = n;
         Ok(removed)
-    }
-
-    /// Saves all the nodes in the db, clears the cache data, recalculates the root.
-    /// Returns the root hash of the trie.
-    pub fn root(&mut self) -> TrieResult<H256> {
-        self.commit()
     }
 
     /// Prove constructs a merkle proof for key. The result contains all encoded nodes
@@ -244,8 +238,7 @@ impl<'db, D: HashDB> PatriciaTrie<'db, D> {
     /// nodes of the longest existing prefix of the key (at least the root node), ending
     /// with the node that proves the absence of the key.
     pub fn get_proof(&self, key: &[u8]) -> TrieResult<Vec<Vec<u8>>> {
-        let mut path =
-            self.get_path_at(self.root.clone(), &Nibbles::from_raw(key.to_vec(), true))?;
+        let mut path = self.get_path_at(self.root.clone(), &Nibbles::from_raw(key, true))?;
         match self.root {
             Node::Empty => {}
             _ => path.push(self.root.clone()),
@@ -487,7 +480,7 @@ impl<'db, D: HashDB> PatriciaTrie<'db, D> {
 
                 // if only a value node, transmute to leaf.
                 if used_indexs.is_empty() && borrow_branch.value.is_some() {
-                    let key = Nibbles::from_raw([].to_vec(), true);
+                    let key = Nibbles::from_raw(&[], true);
                     let value = borrow_branch.value.clone().unwrap();
                     Ok(Node::from_leaf(key, value))
                 // if only one node. make an extension.
@@ -576,7 +569,9 @@ impl<'db, D: HashDB> PatriciaTrie<'db, D> {
         }
     }
 
-    fn commit(&mut self) -> TrieResult<H256> {
+    /// Saves all the nodes in the db, clears the cache data, recalculates the root.
+    /// Returns the root hash of the trie.
+    pub fn root(&mut self) -> TrieResult<H256> {
         let encoded = self.encode_node(self.root.clone());
         let root_hash = match encoded {
             RawNodeOrHash::Node(raw) => {
@@ -681,7 +676,7 @@ impl<'db, D: HashDB> PatriciaTrie<'db, D> {
             Prototype::Data(0) => Ok(Node::Empty),
             Prototype::List(2) => {
                 let key = r.at(0)?.data()?;
-                let key = Nibbles::from_compact(key.to_vec());
+                let key = Nibbles::from_compact(key);
 
                 if key.is_leaf() {
                     Ok(Node::from_leaf(key, r.at(1)?.data()?.to_vec()))

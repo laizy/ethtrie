@@ -2,8 +2,8 @@ use criterion::{criterion_group, criterion_main, Criterion};
 
 use uuid::Uuid;
 
-use cita_trie::MemoryDB;
-use cita_trie::PatriciaTrie;
+use ethtrie::MemoryDB;
+use ethtrie::PatriciaTrie;
 
 fn insert_worse_case_benchmark(c: &mut Criterion) {
     c.bench_function("insert one", |b| {
@@ -13,7 +13,7 @@ fn insert_worse_case_benchmark(c: &mut Criterion) {
         b.iter(|| {
             let key = Uuid::new_v4().as_bytes().to_vec();
             let value = Uuid::new_v4().as_bytes().to_vec();
-            trie.insert(key, value).unwrap()
+            trie.insert(&key, value).unwrap()
         })
     });
 
@@ -24,7 +24,7 @@ fn insert_worse_case_benchmark(c: &mut Criterion) {
         let (keys, values) = random_data(1000);
         b.iter(|| {
             for i in 0..keys.len() {
-                trie.insert(keys[i].clone(), values[i].clone()).unwrap()
+                trie.insert(&keys[i], values[i].clone()).unwrap()
             }
         });
     });
@@ -36,7 +36,7 @@ fn insert_worse_case_benchmark(c: &mut Criterion) {
         let (keys, values) = random_data(10000);
         b.iter(|| {
             for i in 0..keys.len() {
-                trie.insert(keys[i].clone(), values[i].clone()).unwrap()
+                trie.insert(&keys[i], values[i].clone()).unwrap()
             }
         });
     });
@@ -47,7 +47,7 @@ fn insert_worse_case_benchmark(c: &mut Criterion) {
 
         let (keys, values) = random_data(10000);
         for i in 0..keys.len() {
-            trie.insert(keys[i].clone(), values[i].clone()).unwrap()
+            trie.insert(&keys[i], values[i].clone()).unwrap()
         }
 
         b.iter(|| {
@@ -62,7 +62,7 @@ fn insert_worse_case_benchmark(c: &mut Criterion) {
 
         let (keys, values) = random_data(1000);
         for i in 0..keys.len() {
-            trie.insert(keys[i].clone(), values[i].clone()).unwrap()
+            trie.insert(&keys[i], values[i].clone()).unwrap()
         }
 
         b.iter(|| {
@@ -78,7 +78,7 @@ fn insert_worse_case_benchmark(c: &mut Criterion) {
 
         let (keys, values) = random_data(10000);
         for i in 0..keys.len() {
-            trie.insert(keys[i].clone(), values[i].clone()).unwrap()
+            trie.insert(&keys[i], values[i].clone()).unwrap()
         }
 
         b.iter(|| {

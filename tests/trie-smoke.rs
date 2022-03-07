@@ -10,14 +10,14 @@ use ethtrie::{keccak256, HashDB, MemoryDB, PatriciaTrie};
 fn test_trie_insert() {
     let mut memdb = MemoryDB::new(true);
     let mut trie = PatriciaTrie::new(&mut memdb);
-    trie.insert(b"test".to_vec(), b"test".to_vec()).unwrap();
+    trie.insert(b"test", b"test".to_vec()).unwrap();
 }
 
 #[test]
 fn test_trie_get() {
     let mut memdb = MemoryDB::new(true);
     let mut trie = PatriciaTrie::new(&mut memdb);
-    trie.insert(b"test".to_vec(), b"test".to_vec()).unwrap();
+    trie.insert(b"test", b"test".to_vec()).unwrap();
     let v = trie.get(b"test").unwrap();
 
     assert_eq!(Some(b"test".to_vec()), v)
@@ -31,7 +31,7 @@ fn test_trie_random_insert() {
     for _ in 0..1000 {
         let rand_str: String = thread_rng().sample_iter(&Alphanumeric).take(30).collect();
         let val = rand_str.as_bytes();
-        trie.insert(val.to_vec(), val.to_vec()).unwrap();
+        trie.insert(val, val.to_vec()).unwrap();
 
         let v = trie.get(val).unwrap();
         assert_eq!(v.map(|v| v.to_vec()), Some(val.to_vec()));
@@ -42,7 +42,7 @@ fn test_trie_random_insert() {
 fn test_trie_contains() {
     let mut memdb = MemoryDB::new(true);
     let mut trie = PatriciaTrie::new(&mut memdb);
-    trie.insert(b"test".to_vec(), b"test".to_vec()).unwrap();
+    trie.insert(b"test", b"test".to_vec()).unwrap();
     assert_eq!(true, trie.contains(b"test").unwrap());
     assert_eq!(false, trie.contains(b"test2").unwrap());
 }
@@ -51,7 +51,7 @@ fn test_trie_contains() {
 fn test_trie_remove() {
     let mut memdb = MemoryDB::new(true);
     let mut trie = PatriciaTrie::new(&mut memdb);
-    trie.insert(b"test".to_vec(), b"test".to_vec()).unwrap();
+    trie.insert(b"test", b"test".to_vec()).unwrap();
     let removed = trie.remove(b"test").unwrap();
     assert_eq!(true, removed)
 }
@@ -64,7 +64,7 @@ fn test_trie_random_remove() {
     for _ in 0..1000 {
         let rand_str: String = thread_rng().sample_iter(&Alphanumeric).take(30).collect();
         let val = rand_str.as_bytes();
-        trie.insert(val.to_vec(), val.to_vec()).unwrap();
+        trie.insert(val, val.to_vec()).unwrap();
 
         let removed = trie.remove(val).unwrap();
         assert_eq!(true, removed);
@@ -76,12 +76,12 @@ fn test_trie_from_root() {
     let mut memdb = MemoryDB::new(true);
     let root = {
         let mut trie = PatriciaTrie::new(&mut memdb);
-        trie.insert(b"test".to_vec(), b"test".to_vec()).unwrap();
-        trie.insert(b"test1".to_vec(), b"test".to_vec()).unwrap();
-        trie.insert(b"test2".to_vec(), b"test".to_vec()).unwrap();
-        trie.insert(b"test23".to_vec(), b"test".to_vec()).unwrap();
-        trie.insert(b"test33".to_vec(), b"test".to_vec()).unwrap();
-        trie.insert(b"test44".to_vec(), b"test".to_vec()).unwrap();
+        trie.insert(b"test", b"test".to_vec()).unwrap();
+        trie.insert(b"test1", b"test".to_vec()).unwrap();
+        trie.insert(b"test2", b"test".to_vec()).unwrap();
+        trie.insert(b"test23", b"test".to_vec()).unwrap();
+        trie.insert(b"test33", b"test".to_vec()).unwrap();
+        trie.insert(b"test44", b"test".to_vec()).unwrap();
         trie.root().unwrap()
     };
 
@@ -99,17 +99,17 @@ fn test_trie_from_root_and_insert() {
     let mut memdb = MemoryDB::new(true);
     let root = {
         let mut trie = PatriciaTrie::new(&mut memdb);
-        trie.insert(b"test".to_vec(), b"test".to_vec()).unwrap();
-        trie.insert(b"test1".to_vec(), b"test".to_vec()).unwrap();
-        trie.insert(b"test2".to_vec(), b"test".to_vec()).unwrap();
-        trie.insert(b"test23".to_vec(), b"test".to_vec()).unwrap();
-        trie.insert(b"test33".to_vec(), b"test".to_vec()).unwrap();
-        trie.insert(b"test44".to_vec(), b"test".to_vec()).unwrap();
+        trie.insert(b"test", b"test".to_vec()).unwrap();
+        trie.insert(b"test1", b"test".to_vec()).unwrap();
+        trie.insert(b"test2", b"test".to_vec()).unwrap();
+        trie.insert(b"test23", b"test".to_vec()).unwrap();
+        trie.insert(b"test33", b"test".to_vec()).unwrap();
+        trie.insert(b"test44", b"test".to_vec()).unwrap();
         trie.root().unwrap()
     };
 
     let mut trie = PatriciaTrie::from(&mut memdb, root).unwrap();
-    trie.insert(b"test55".to_vec(), b"test55".to_vec()).unwrap();
+    trie.insert(b"test55", b"test55".to_vec()).unwrap();
     trie.root().unwrap();
     let v = trie.get(b"test55").unwrap();
     assert_eq!(Some(b"test55".to_vec()), v);
@@ -120,12 +120,12 @@ fn test_trie_from_root_and_delete() {
     let mut memdb = MemoryDB::new(true);
     let root = {
         let mut trie = PatriciaTrie::new(&mut memdb);
-        trie.insert(b"test".to_vec(), b"test".to_vec()).unwrap();
-        trie.insert(b"test1".to_vec(), b"test".to_vec()).unwrap();
-        trie.insert(b"test2".to_vec(), b"test".to_vec()).unwrap();
-        trie.insert(b"test23".to_vec(), b"test".to_vec()).unwrap();
-        trie.insert(b"test33".to_vec(), b"test".to_vec()).unwrap();
-        trie.insert(b"test44".to_vec(), b"test".to_vec()).unwrap();
+        trie.insert(b"test", b"test".to_vec()).unwrap();
+        trie.insert(b"test1", b"test".to_vec()).unwrap();
+        trie.insert(b"test2", b"test".to_vec()).unwrap();
+        trie.insert(b"test23", b"test".to_vec()).unwrap();
+        trie.insert(b"test33", b"test".to_vec()).unwrap();
+        trie.insert(b"test44", b"test".to_vec()).unwrap();
         trie.root().unwrap()
     };
 
@@ -147,18 +147,15 @@ fn test_multiple_trie_roots() {
     let root1 = {
         let mut memdb = MemoryDB::new(true);
         let mut trie = PatriciaTrie::new(&mut memdb);
-        trie.insert(k0.as_bytes().to_vec(), v.as_bytes().to_vec())
-            .unwrap();
+        trie.insert(k0.as_bytes(), v.as_bytes().to_vec()).unwrap();
         trie.root().unwrap()
     };
 
     let root2 = {
         let mut memdb = MemoryDB::new(true);
         let mut trie = PatriciaTrie::new(&mut memdb);
-        trie.insert(k0.as_bytes().to_vec(), v.as_bytes().to_vec())
-            .unwrap();
-        trie.insert(k1.as_bytes().to_vec(), v.as_bytes().to_vec())
-            .unwrap();
+        trie.insert(k0.as_bytes(), v.as_bytes().to_vec()).unwrap();
+        trie.insert(k1.as_bytes(), v.as_bytes().to_vec()).unwrap();
         trie.root().unwrap();
         trie.remove(k1.as_ref()).unwrap();
         trie.root().unwrap()
@@ -168,17 +165,13 @@ fn test_multiple_trie_roots() {
         let mut memdb = MemoryDB::new(true);
         let root = {
             let mut trie1 = PatriciaTrie::new(&mut memdb);
-            trie1
-                .insert(k0.as_bytes().to_vec(), v.as_bytes().to_vec())
-                .unwrap();
-            trie1
-                .insert(k1.as_bytes().to_vec(), v.as_bytes().to_vec())
-                .unwrap();
+            trie1.insert(k0.as_bytes(), v.as_bytes().to_vec()).unwrap();
+            trie1.insert(k1.as_bytes(), v.as_bytes().to_vec()).unwrap();
             trie1.root().unwrap();
             trie1.root().unwrap()
         };
         let mut trie2 = PatriciaTrie::from(&mut memdb, root).unwrap();
-        trie2.remove(&k1.as_bytes().to_vec()).unwrap();
+        trie2.remove(&k1.as_bytes()).unwrap();
         trie2.root().unwrap()
     };
 
@@ -197,8 +190,7 @@ fn test_delete_stale_keys_with_random_insert_and_delete() {
         let random_bytes: Vec<u8> = (0..rng.gen_range(2, 30u8))
             .map(|_| rand::random::<u8>())
             .collect();
-        trie.insert(random_bytes.clone(), random_bytes.clone())
-            .unwrap();
+        trie.insert(&random_bytes, random_bytes.clone()).unwrap();
         keys.push(random_bytes.clone());
     }
     trie.root().unwrap();
@@ -220,12 +212,12 @@ fn insert_full_branch() {
     let mut memdb = MemoryDB::new(true);
     let mut trie = PatriciaTrie::new(&mut memdb);
 
-    trie.insert(b"test".to_vec(), b"test".to_vec()).unwrap();
-    trie.insert(b"test1".to_vec(), b"test".to_vec()).unwrap();
-    trie.insert(b"test2".to_vec(), b"test".to_vec()).unwrap();
-    trie.insert(b"test23".to_vec(), b"test".to_vec()).unwrap();
-    trie.insert(b"test33".to_vec(), b"test".to_vec()).unwrap();
-    trie.insert(b"test44".to_vec(), b"test".to_vec()).unwrap();
+    trie.insert(b"test", b"test".to_vec()).unwrap();
+    trie.insert(b"test1", b"test".to_vec()).unwrap();
+    trie.insert(b"test2", b"test".to_vec()).unwrap();
+    trie.insert(b"test23", b"test".to_vec()).unwrap();
+    trie.insert(b"test33", b"test".to_vec()).unwrap();
+    trie.insert(b"test44", b"test".to_vec()).unwrap();
     trie.root().unwrap();
 
     let v = trie.get(b"test").unwrap();
@@ -250,7 +242,7 @@ fn iterator_trie() {
         let mut trie = PatriciaTrie::new(&mut memdb);
         let mut kv = kv.clone();
         kv.iter().for_each(|(k, v)| {
-            trie.insert(k.clone(), v.clone()).unwrap();
+            trie.insert(k, v.clone()).unwrap();
         });
         root1 = trie.root().unwrap();
 
@@ -270,7 +262,7 @@ fn iterator_trie() {
         kv2.insert(b"test16".to_vec(), b"test16".to_vec());
         kv2.insert(b"test2".to_vec(), b"test17".to_vec());
         kv2.iter().for_each(|(k, v)| {
-            trie.insert(k.clone(), v.clone()).unwrap();
+            trie.insert(k, v.clone()).unwrap();
         });
 
         trie.root().unwrap();

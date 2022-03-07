@@ -13,27 +13,23 @@ The implementation is forked from [cita-trie](https://crates.io/crates/cita_trie
 ## Example
 
 ```rust
- use ethtrie::{MemoryDB, PatriciaTrie};
-
+use ethtrie::{TrieDB, MemoryDB, keccak256};
 fn main() {
     let mut memdb = MemoryDB::new(true);
-
-    let key = "test-key".as_bytes();
-    let value = "test-value".as_bytes();
-
+    let key = keccak256(b"test-key");
+    let value = b"test-value";
     let root = {
-        let mut trie = PatriciaTrie::new(&mut memdb);
-        trie.insert(key.to_vec(), value.to_vec()).unwrap();
-
-        let v = trie.get(key).unwrap();
+        let mut trie = TrieDB::new(&mut memdb);
+        trie.insert(&key, value.to_vec()).unwrap();
+        let v = trie.get(&key).unwrap();
         assert_eq!(Some(value.to_vec()), v);
         trie.root().unwrap()
     };
-
-    let mut trie = PatriciaTrie::from(&mut memdb, root).unwrap();
-    let exists = trie.contains(key).unwrap();
+    
+    let mut trie = TrieDB::from(&mut memdb, root).unwrap();
+    let exists = trie.contains(&key).unwrap();
     assert_eq!(exists, true);
-    let removed = trie.remove(key).unwrap();
+    let removed = trie.remove(&key).unwrap();
     assert_eq!(removed, true);
     let new_root = trie.root().unwrap();
     println!("new root = {:?}", new_root);
@@ -43,44 +39,11 @@ fn main() {
 ## Benchmark
 
 ```sh
-cargo bench
-
-Gnuplot not found, disabling plotting
-insert one              time:   [1.6564 us 1.7287 us 1.7955 us]
-                        change: [-2.2715% +1.5151% +5.1789%] (p = 0.42 > 0.05)
-                        No change in performance detected.
-
-insert 1k               time:   [1.1620 ms 1.1763 ms 1.1942 ms]
-                        change: [-2.3339% +0.7190% +3.7809%] (p = 0.65 > 0.05)
-                        No change in performance detected.
-Found 16 outliers among 100 measurements (16.00%)
-  9 (9.00%) high mild
-  7 (7.00%) high severe
-
-insert 10k              time:   [13.491 ms 13.677 ms 13.891 ms]
-                        change: [-5.3670% -1.2847% +2.8328%] (p = 0.54 > 0.05)
-                        No change in performance detected.
-Found 10 outliers among 100 measurements (10.00%)
-  9 (9.00%) high mild
-  1 (1.00%) high severe
-
-get based 10k           time:   [1.0707 us 1.0965 us 1.1270 us]
-                        change: [-10.331% -6.5107% -2.6793%] (p = 0.00 < 0.05)
-                        Performance has improved.
-Found 11 outliers among 100 measurements (11.00%)
-  11 (11.00%) high mild
-
-remove 1k               time:   [538.54 us 545.18 us 553.96 us]
-                        change: [-7.3508% -0.7110% +7.0860%] (p = 0.86 > 0.05)
-                        No change in performance detected.
-Found 12 outliers among 100 measurements (12.00%)
-  5 (5.00%) high mild
-  7 (7.00%) high severe
-
-remove 10k              time:   [5.7277 ms 5.7780 ms 5.8367 ms]
-                        change: [-18.778% -5.4831% +10.503%] (p = 0.51 > 0.05)
-                        No change in performance detected.
-Found 11 outliers among 100 measurements (11.00%)
-  1 (1.00%) high mild
-  10 (10.00%) high severe
+> cargo bench
+insert one              time:   [779.96 ns 794.04 ns 807.55 ns]
+insert 1k               time:   [278.41 us 279.84 us 281.50 us]
+insert 10k              time:   [3.2367 ms 3.2616 ms 3.2883 ms]
+get based 10k           time:   [256.94 ns 259.88 ns 262.76 ns]
+remove 1k               time:   [150.92 us 152.49 us 154.35 us]
+remove 10k              time:   [1.5751 ms 1.5893 ms 1.6062 ms]
 ```
