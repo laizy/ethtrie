@@ -1,15 +1,15 @@
 [package]
 name = "ethtrie"
 version = "0.1.0"
-authors = ["yejiayu <yejiayu.fe@gmail.com>"]
-description = "Modified Patricia Tree (aka Trie)."
+authors = ["laizy <aochyi@126.com", "yejiayu <yejiayu.fe@gmail.com>"]
+description = "Ethereum-compatible Merkle-Patricia Trie."
 license = "Apache-2.0"
 edition = "2018"
 readme = "README.md"
-keywords = ["patricia", "mpt", "evm", "trie", "ethereum"]
-repository = "https://github.com/cryptape/cita-trie"
-homepage = "https://github.com/cryptape/cita-trie"
-documentation = "https://docs.rs/cita_trie"
+keywords = ["patricia", "mpt", "evm", "trie", "ethereum", "no_std"]
+repository = "https://github.com/laizy/ethtrie"
+homepage = "https://github.com/laizy/ethtrie"
+documentation = "https://docs.rs/ethtrie"
 
 [dependencies]
 rlp = {version = "0.4.0", default-features = false}

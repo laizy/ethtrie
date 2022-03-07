@@ -1,24 +1,19 @@
-## CITA-Trie
+## ethtrie
 
-[![Latest Version](https://img.shields.io/crates/v/cita_trie.svg)](https://crates.io/crates/cita_trie)
-[![](https://travis-ci.org/cryptape/cita-trie.svg?branch=master)](https://travis-ci.org/cryptape/cita-trie)
-[![](https://img.shields.io/hexpm/l/plug.svg)](https://github.com/cryptape/cita-trie/blob/master/LICENSE)
+Rust implementation of the Merkle-Patricia Trie.
 
-Rust implementation of the Modified Patricia Tree (aka Trie),
-
-The implementation is strongly inspired by [go-ethereum trie](https://github.com/ethereum/go-ethereum/tree/master/trie)
+The implementation is forked from [cita-trie](https://crates.io/crates/cita_trie) to support no_std.
 
 ## Features
 
+- Support `no_std`
 - Implementation of the Modified Patricia Tree
-- Custom hash algorithm (Keccak is provided by default)
 - Custom storage interface
 
 ## Example
 
 ```rust
- use cita_trie::MemoryDB;
- use cita_trie::PatriciaTrie;
+ use ethtrie::{MemoryDB, PatriciaTrie};
 
 fn main() {
     let mut memdb = MemoryDB::new(true);
@@ -43,7 +38,6 @@ fn main() {
     let new_root = trie.root().unwrap();
     println!("new root = {:?}", new_root);
 }
-
 ```
 
 ## Benchmark
@@ -90,10 +84,3 @@ Found 11 outliers among 100 measurements (11.00%)
   1 (1.00%) high mild
   10 (10.00%) high severe
 ```
-
-### Custom hash algorithm
-See: https://crates.io/crates/hasher
-
-### Custom storage
-
-[Refer](https://github.com/cryptape/cita-trie/blob/master/src/db.rs)
