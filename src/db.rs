@@ -1,5 +1,7 @@
+extern crate alloc;
+use alloc::vec::Vec;
 use ethereum_types::H256;
-use hashbrown::HashMap ;
+use hashbrown::HashMap;
 
 /// "DB" defines the "trait" of trie and database interaction.
 /// You should first write the data to the cache and write the data
@@ -47,7 +49,10 @@ pub struct MemoryDB {
 
 impl MemoryDB {
     pub fn new(light: bool) -> Self {
-        MemoryDB { light, storage: HashMap::new(), }
+        MemoryDB {
+            light,
+            storage: HashMap::new(),
+        }
     }
 }
 

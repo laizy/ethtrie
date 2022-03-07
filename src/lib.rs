@@ -1,16 +1,11 @@
+#![no_std]
+
 //! ## Usage
 //!
 //! ```rust
-//! use std::sync::Arc;
-//!
-//! use hasher::{Hasher, HasherKeccak}; // https://crates.io/crates/hasher
-//!
-//! use cita_trie::MemoryDB;
-//! use cita_trie::{PatriciaTrie };
-
+//! use ethtrie::{PatriciaTrie, MemoryDB};
 //! fn main() {
 //!     let mut memdb = MemoryDB::new(true);
-//!     let hasher = Arc::new(HasherKeccak::new());
 //!
 //!     let key = "test-key".as_bytes();
 //!     let value = "test-value".as_bytes();
@@ -31,13 +26,11 @@
 //!     assert_eq!(removed, true);
 //!     let new_root = trie.root().unwrap();
 //!     println!("new root = {:?}", new_root);
-//!
 //! }
 //! ```
 
 mod nibbles;
 mod node;
-mod tests;
 
 mod db;
 mod errors;
@@ -46,6 +39,7 @@ mod trie;
 
 pub use db::{HashDB, MemoryDB};
 pub use errors::TrieError;
+pub use hasher::keccak256;
 pub use trie::PatriciaTrie;
 
 pub use ethereum_types::H256;

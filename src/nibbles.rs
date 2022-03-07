@@ -1,4 +1,7 @@
-use std::cmp::min;
+extern crate alloc;
+use alloc::vec;
+use alloc::vec::Vec;
+use core::cmp::min;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Nibbles {

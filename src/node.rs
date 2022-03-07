@@ -1,6 +1,8 @@
+extern crate alloc;
+use alloc::rc::Rc;
+use alloc::vec::Vec;
+use core::cell::RefCell;
 use ethereum_types::H256;
-use std::cell::RefCell;
-use std::rc::Rc;
 
 use crate::nibbles::Nibbles;
 
