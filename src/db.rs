@@ -33,11 +33,6 @@ pub trait HashDB {
 
     /// Flush data to the DB from the cache.
     fn flush(&mut self);
-
-    #[cfg(test)]
-    fn len(&self) -> usize;
-    #[cfg(test)]
-    fn is_empty(&self) -> bool;
 }
 
 #[derive(Default, Debug)]
@@ -76,13 +71,4 @@ impl HashDB for MemoryDB {
     }
 
     fn flush(&mut self) {}
-
-    #[cfg(test)]
-    fn len(&self) -> usize {
-        self.storage.len()
-    }
-    #[cfg(test)]
-    fn is_empty(&self) -> bool {
-        self.storage.is_empty()
-    }
 }
