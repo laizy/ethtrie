@@ -10,7 +10,7 @@ pub enum Node {
     Leaf(Rc<RefCell<LeafNode>>),
     Extension(Rc<RefCell<ExtensionNode>>),
     Branch(Rc<RefCell<BranchNode>>),
-    Hash(Rc<RefCell<HashNode>>),
+    Hash(H256),
 }
 
 pub enum RawNodeOrHash {
@@ -35,8 +35,7 @@ impl Node {
     }
 
     pub fn from_hash(hash: H256) -> Self {
-        let hash_node = Rc::new(RefCell::new(HashNode { hash }));
-        Node::Hash(hash_node)
+        Node::Hash(hash)
     }
 }
 

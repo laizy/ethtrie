@@ -117,8 +117,8 @@ impl<'a, 'db, D: HashDB> Iterator for TrieIterator<'a, 'db, D> {
                         }
                     }
 
-                    (TraceStatus::Doing, Node::Hash(ref hash_node)) => {
-                        if let Ok(n) = self.trie.recover_from_db(&hash_node.borrow().hash.clone()) {
+                    (TraceStatus::Doing, Node::Hash(hash_node)) => {
+                        if let Ok(n) = self.trie.recover_from_db(&hash_node) {
                             self.nodes.pop();
                             self.nodes.push(n.into());
                         } else {
@@ -304,9 +304,8 @@ impl<'db, D: HashDB> PatriciaTrie<'db, D> {
                     Ok(None)
                 }
             }
-            Node::Hash(hash_node) => {
-                let borrow_hash_node = hash_node.borrow();
-                let n = self.recover_from_db(&borrow_hash_node.hash)?;
+            Node::Hash(hash) => {
+                let n = self.recover_from_db(&hash)?;
                 self.get_at(n, partial)
             }
         }
@@ -400,10 +399,8 @@ impl<'db, D: HashDB> PatriciaTrie<'db, D> {
                 Ok(Node::Extension(ext.clone()))
             }
             Node::Hash(hash_node) => {
-                let borrow_hash_node = hash_node.borrow();
-
-                self.passing_keys.insert(borrow_hash_node.hash);
-                let n = self.recover_from_db(&borrow_hash_node.hash)?;
+                self.passing_keys.insert(hash_node);
+                let n = self.recover_from_db(&hash_node)?;
                 self.insert_at(n, partial, value)
             }
         }
@@ -458,10 +455,9 @@ impl<'db, D: HashDB> PatriciaTrie<'db, D> {
                 }
             }
             Node::Hash(hash_node) => {
-                let hash = hash_node.borrow().hash.clone();
-                self.passing_keys.insert(hash);
+                self.passing_keys.insert(hash_node);
 
-                let n = self.recover_from_db(&hash)?;
+                let n = self.recover_from_db(&hash_node)?;
                 self.delete_at(n, partial)
             }
         }?;
@@ -522,9 +518,8 @@ impl<'db, D: HashDB> PatriciaTrie<'db, D> {
                         Ok(Node::from_leaf(new_prefix, borrow_leaf.value.clone()))
                     }
                     // try again after recovering node from the db.
-                    Node::Hash(hash_node) => {
-                        let hash = hash_node.borrow().hash.clone();
-                        self.passing_keys.insert(hash.clone());
+                    Node::Hash(hash) => {
+                        self.passing_keys.insert(hash);
 
                         let new_node = self.recover_from_db(&hash)?;
 
@@ -570,7 +565,7 @@ impl<'db, D: HashDB> PatriciaTrie<'db, D> {
                 }
             }
             Node::Hash(hash_node) => {
-                let n = self.recover_from_db(&hash_node.borrow().hash.clone())?;
+                let n = self.recover_from_db(&hash_node)?;
                 let mut rest = self.get_path_at(n.clone(), partial)?;
                 rest.push(n);
                 Ok(rest)
@@ -589,14 +584,9 @@ impl<'db, D: HashDB> PatriciaTrie<'db, D> {
             RawNodeOrHash::Hash(hash) => hash,
         };
 
-        let mut keys = Vec::with_capacity(self.cache.get_mut().len());
-        let mut values = Vec::with_capacity(self.cache.get_mut().len());
         for (k, v) in self.cache.get_mut().drain() {
-            keys.push(k);
-            values.push(v);
+            self.db.insert(k, v);
         }
-
-        self.db.insert_batch(keys, values);
 
         let removed_keys: Vec<H256> = self
             .passing_keys
@@ -617,7 +607,7 @@ impl<'db, D: HashDB> PatriciaTrie<'db, D> {
     fn encode_node(&self, n: Node) -> RawNodeOrHash {
         // Returns the hash value directly to avoid double counting.
         if let Node::Hash(hash_node) = n {
-            return RawNodeOrHash::Hash(hash_node.borrow().hash.clone());
+            return RawNodeOrHash::Hash(hash_node);
         }
 
         let data = self.encode_raw(n.clone());

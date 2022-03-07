@@ -17,10 +17,8 @@ pub trait HashDB {
 
     /// Insert a batch of data into the cache.
     fn insert_batch(&mut self, keys: Vec<H256>, values: Vec<Vec<u8>>) {
-        for i in 0..keys.len() {
-            let key = keys[i].clone();
-            let value = values[i].clone();
-            self.insert(key, value);
+        for (k, v) in keys.into_iter().zip(values) {
+            self.insert(k, v);
         }
     }
 
