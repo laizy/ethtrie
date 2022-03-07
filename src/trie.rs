@@ -219,7 +219,7 @@ impl<'db, D: HashDB> PatriciaTrie<'db, D> {
             return Ok(());
         }
         let root = self.root.clone();
-        self.root = self.insert_at(root, Nibbles::from_raw(key, true), value.to_vec())?;
+        self.root = self.insert_at(root, Nibbles::from_raw(key, true), value)?;
         Ok(())
     }
 
