@@ -12,6 +12,14 @@ pub struct SecTrieDB<'db, D: HashDB> {
 }
 
 impl<'db, D: HashDB> TrieDB<'db, D> {
+    pub fn hashdb_mut(&mut self) -> &mut D {
+        self.trie.hashdb_mut()
+    }
+
+    pub fn hashdb(&self) -> & D {
+        self.trie.hashdb()
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = (H256, Vec<u8>)> + '_ {
         self.trie
             .iter()
@@ -42,6 +50,14 @@ impl<'db, D: HashDB> SecTrieDB<'db, D> {
         Ok(Self {
             trie: TrieDB::from(db, root)?,
         })
+    }
+
+    pub fn hashdb_mut(&mut self) -> &mut D {
+        self.trie.hashdb_mut()
+    }
+
+    pub fn hashdb(&self) -> & D {
+        self.trie.hashdb()
     }
 }
 

@@ -22,7 +22,7 @@ const HASH_LEN: usize = 32;
 pub struct PatriciaTrie<'db, D: HashDB> {
     root: Node,
     root_hash: H256,
-    db: &'db mut D,
+    hashdb: &'db mut D,
     cache: RefCell<HashMap<H256, Vec<u8>>>,
     passing_keys: HashSet<H256>,
     gen_keys: RefCell<HashSet<H256>>,
@@ -154,6 +154,14 @@ impl<'a, 'db, D: HashDB> Iterator for TrieIterator<'a, 'db, D> {
 }
 
 impl<'db, D: HashDB> PatriciaTrie<'db, D> {
+    pub fn hashdb_mut(&mut self) -> &mut D {
+        &mut self.hashdb
+    }
+
+    pub fn hashdb(&self) -> & D {
+        &self.hashdb
+    }
+
     pub fn iter(&self) -> TrieIterator<D> {
         let mut nodes = Vec::new();
         nodes.push((self.root.clone()).into());
@@ -173,7 +181,7 @@ impl<'db, D: HashDB> PatriciaTrie<'db, D> {
             passing_keys: HashSet::new(),
             gen_keys: RefCell::new(HashSet::new()),
 
-            db,
+            hashdb: db,
         }
     }
 
@@ -188,7 +196,7 @@ impl<'db, D: HashDB> PatriciaTrie<'db, D> {
                     passing_keys: HashSet::new(),
                     gen_keys: RefCell::new(HashSet::new()),
 
-                    db,
+                    hashdb: db,
                 };
 
                 trie.root = trie.decode_node(&data)?;
@@ -583,7 +591,7 @@ impl<'db, D: HashDB> PatriciaTrie<'db, D> {
         };
 
         for (k, v) in self.cache.get_mut().drain() {
-            self.db.insert(k, v);
+            self.hashdb.insert(k, v);
         }
 
         let removed_keys: Vec<H256> = self
@@ -593,7 +601,7 @@ impl<'db, D: HashDB> PatriciaTrie<'db, D> {
             .map(|h| *h)
             .collect();
 
-        self.db.remove_batch(&removed_keys);
+        self.hashdb.remove_batch(&removed_keys);
 
         self.root_hash = root_hash;
         self.gen_keys.get_mut().clear();
@@ -716,7 +724,7 @@ impl<'db, D: HashDB> PatriciaTrie<'db, D> {
     }
 
     fn recover_from_db(&self, key: &H256) -> TrieResult<Node> {
-        match self.db.get(key) {
+        match self.hashdb.get(key) {
             Some(value) => Ok(self.decode_node(&value)?),
             None => Ok(Node::Empty),
         }
