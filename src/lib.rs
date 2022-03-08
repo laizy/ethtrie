@@ -3,7 +3,7 @@
 //! ## Usage
 //!
 //! ```rust
-//! use ethtrie::{TrieDB, MemoryDB, keccak256};
+//! use ethtrie::{TrieDBMut, MemoryDB, keccak256};
 //! fn main() {
 //!     let mut memdb = MemoryDB::new(true);
 //!
@@ -11,7 +11,7 @@
 //!     let value = b"test-value";
 //!
 //!     let root = {
-//!         let mut trie = TrieDB::new(&mut memdb);
+//!         let mut trie = TrieDBMut::new(&mut memdb);
 //!         trie.insert(&key, value.to_vec()).unwrap();
 //!
 //!         let v = trie.get(&key).unwrap();
@@ -19,7 +19,7 @@
 //!         trie.root().unwrap()
 //!     };
 //!
-//!     let mut trie = TrieDB::from(&mut memdb, root).unwrap();
+//!     let mut trie = TrieDBMut::from(&mut memdb, root).unwrap();
 //!     let exists = trie.contains(&key).unwrap();
 //!     assert_eq!(exists, true);
 //!     let removed = trie.remove(&key).unwrap();
@@ -40,8 +40,8 @@ mod trie;
 
 pub use db::{HashDB, MemoryDB};
 pub use errors::TrieError;
-pub use eth::{SecTrieDB, TrieDB};
+pub use eth::{SecTrieDB, SecTrieDBMut, TrieDB, TrieDBMut};
 pub use hasher::keccak256;
-pub use trie::PatriciaTrie;
+pub use trie::{PatriciaTrie, PatriciaTrieMut};
 
 pub use ethereum_types::H256;

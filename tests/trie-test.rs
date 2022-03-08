@@ -1,18 +1,18 @@
 use hex::FromHex;
 use rand::Rng;
 
-use ethtrie::{MemoryDB, PatriciaTrie};
+use ethtrie::{MemoryDB, PatriciaTrieMut};
 
 fn assert_root(data: Vec<(&[u8], &[u8])>, hash: &str) {
     let mut memdb = MemoryDB::new(true);
-    let mut trie = PatriciaTrie::new(&mut memdb);
+    let mut trie = PatriciaTrieMut::new(&mut memdb);
     for (k, v) in data.into_iter() {
         trie.insert(k, v.to_vec()).unwrap();
     }
     let r = trie.root().unwrap();
     let rs = format!("0x{}", hex::encode(r.clone()));
     assert_eq!(rs.as_str(), hash);
-    let mut trie = PatriciaTrie::from(&mut memdb, r).unwrap();
+    let mut trie = PatriciaTrieMut::from(&mut memdb, r).unwrap();
     let r2 = trie.root().unwrap();
     let rs2 = format!("0x{}", hex::encode(r2));
     assert_eq!(rs2.as_str(), hash);
@@ -515,7 +515,7 @@ fn test_root() {
 #[test]
 fn test_proof_basic() {
     let mut memdb = MemoryDB::new(true);
-    let mut trie = PatriciaTrie::new(&mut memdb);
+    let mut trie = PatriciaTrieMut::new(&mut memdb);
     trie.insert(b"doe", b"reindeer".to_vec()).unwrap();
     trie.insert(b"dog", b"puppy".to_vec()).unwrap();
     trie.insert(b"dogglesworth", b"cat".to_vec()).unwrap();
@@ -575,7 +575,7 @@ fn test_proof_basic() {
 #[test]
 fn test_proof_random() {
     let mut memdb = MemoryDB::new(true);
-    let mut trie = PatriciaTrie::new(&mut memdb);
+    let mut trie = PatriciaTrieMut::new(&mut memdb);
     let mut rng = rand::thread_rng();
     let mut keys = vec![];
     for _ in 0..100 {
@@ -599,7 +599,7 @@ fn test_proof_random() {
 #[test]
 fn test_proof_empty_trie() {
     let mut memdb = MemoryDB::new(true);
-    let mut trie = PatriciaTrie::new(&mut memdb);
+    let mut trie = PatriciaTrieMut::new(&mut memdb);
     trie.root().unwrap();
     let proof = trie.get_proof(b"not-exist").unwrap();
     assert_eq!(proof.len(), 0);
@@ -608,7 +608,7 @@ fn test_proof_empty_trie() {
 #[test]
 fn test_proof_one_element() {
     let mut memdb = MemoryDB::new(true);
-    let mut trie = PatriciaTrie::new(&mut memdb);
+    let mut trie = PatriciaTrieMut::new(&mut memdb);
     trie.insert(b"k", b"v".to_vec()).unwrap();
     let root = trie.root().unwrap();
     let proof = trie.get_proof(b"k").unwrap();

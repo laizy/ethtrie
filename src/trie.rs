@@ -18,14 +18,31 @@ pub type TrieResult<T> = Result<T, TrieError>;
 
 const HASH_LEN: usize = 32;
 
-#[derive(Debug)]
 pub struct PatriciaTrie<'db, D: HashDB> {
     root: Node,
-    root_hash: H256,
+    hashdb: &'db D,
+    cache: Rc<RefCell<HashMap<H256, Vec<u8>>>>,
+    gen_keys: Rc<RefCell<HashSet<H256>>>,
+}
+
+impl<'db, D: HashDB> Clone for PatriciaTrie<'db, D> {
+    fn clone(&self) -> Self {
+        Self {
+            root: self.root.clone(),
+            hashdb: self.hashdb,
+            cache: self.cache.clone(),
+            gen_keys: self.gen_keys.clone(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct PatriciaTrieMut<'db, D: HashDB> {
+    root: Node,
     hashdb: &'db mut D,
-    cache: RefCell<HashMap<H256, Vec<u8>>>,
+    cache: Rc<RefCell<HashMap<H256, Vec<u8>>>>,
     passing_keys: HashSet<H256>,
-    gen_keys: RefCell<HashSet<H256>>,
+    gen_keys: Rc<RefCell<HashSet<H256>>>,
 }
 
 #[derive(Clone, Debug)]
@@ -65,13 +82,13 @@ impl From<Node> for TraceNode {
     }
 }
 
-pub struct TrieIterator<'a, 'db, D: HashDB> {
-    trie: &'a PatriciaTrie<'db, D>,
+pub struct TrieIterator<'db, D: HashDB> {
+    trie: PatriciaTrie<'db, D>,
     nibble: Nibbles,
     nodes: Vec<TraceNode>,
 }
 
-impl<'a, 'db, D: HashDB> Iterator for TrieIterator<'a, 'db, D> {
+impl<'db, D: HashDB> Iterator for TrieIterator<'db, D> {
     type Item = (Vec<u8>, Vec<u8>);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -154,48 +171,22 @@ impl<'a, 'db, D: HashDB> Iterator for TrieIterator<'a, 'db, D> {
 }
 
 impl<'db, D: HashDB> PatriciaTrie<'db, D> {
-    pub fn hashdb_mut(&mut self) -> &mut D {
-        &mut self.hashdb
-    }
-
-    pub fn hashdb(&self) -> & D {
-        &self.hashdb
-    }
-
-    pub fn iter(&self) -> TrieIterator<D> {
-        let mut nodes = Vec::new();
-        nodes.push((self.root.clone()).into());
-        TrieIterator {
-            trie: self,
-            nibble: Nibbles::from_raw(&[], false),
-            nodes,
-        }
-    }
-
-    pub fn new(db: &'db mut D) -> Self {
+    pub fn new(db: &'db D) -> Self {
         Self {
             root: Node::Empty,
-            root_hash: keccak256(&rlp::NULL_RLP.to_vec()),
-
-            cache: RefCell::new(HashMap::new()),
-            passing_keys: HashSet::new(),
-            gen_keys: RefCell::new(HashSet::new()),
-
+            cache: Rc::new(RefCell::new(HashMap::new())),
+            gen_keys: Rc::new(RefCell::new(HashSet::new())),
             hashdb: db,
         }
     }
 
-    pub fn from(db: &'db mut D, root: H256) -> TrieResult<Self> {
+    pub fn from(db: &'db D, root: H256) -> TrieResult<Self> {
         match db.get(&root) {
             Some(data) => {
                 let mut trie = Self {
                     root: Node::Empty,
-                    root_hash: root,
-
-                    cache: RefCell::new(HashMap::new()),
-                    passing_keys: HashSet::new(),
-                    gen_keys: RefCell::new(HashSet::new()),
-
+                    cache: Rc::new(RefCell::new(HashMap::new())),
+                    gen_keys: Rc::new(RefCell::new(HashSet::new())),
                     hashdb: db,
                 };
 
@@ -205,9 +196,21 @@ impl<'db, D: HashDB> PatriciaTrie<'db, D> {
             None => Err(TrieError::InvalidStateRoot),
         }
     }
-}
 
-impl<'db, D: HashDB> PatriciaTrie<'db, D> {
+    pub fn hashdb(&self) -> &D {
+        self.hashdb
+    }
+
+    pub fn iter(&self) -> TrieIterator<'db, D> {
+        let mut nodes = Vec::new();
+        nodes.push(self.root.clone().into());
+        TrieIterator {
+            trie: self.clone(),
+            nibble: Nibbles::from_raw(&[], false),
+            nodes,
+        }
+    }
+
     /// Returns the value for key stored in the trie.
     pub fn get(&self, key: &[u8]) -> TrieResult<Option<Vec<u8>>> {
         self.get_at(self.root.clone(), &Nibbles::from_raw(key, true))
@@ -220,61 +223,6 @@ impl<'db, D: HashDB> PatriciaTrie<'db, D> {
             .map_or(false, |_| true))
     }
 
-    /// Inserts value into trie and modifies it if it exists
-    pub fn insert(&mut self, key: &[u8], value: Vec<u8>) -> TrieResult<()> {
-        if value.is_empty() {
-            self.remove(key)?;
-            return Ok(());
-        }
-        let root = self.root.clone();
-        self.root = self.insert_at(root, Nibbles::from_raw(key, true), value)?;
-        Ok(())
-    }
-
-    /// Removes any existing value for key from the trie.
-    pub fn remove(&mut self, key: &[u8]) -> TrieResult<bool> {
-        let (n, removed) = self.delete_at(self.root.clone(), &Nibbles::from_raw(key, true))?;
-        self.root = n;
-        Ok(removed)
-    }
-
-    /// Prove constructs a merkle proof for key. The result contains all encoded nodes
-    /// on the path to the value at key. The value itself is also included in the last
-    /// node and can be retrieved by verifying the proof.
-    ///
-    /// If the trie does not contain a value for key, the returned proof contains all
-    /// nodes of the longest existing prefix of the key (at least the root node), ending
-    /// with the node that proves the absence of the key.
-    pub fn get_proof(&self, key: &[u8]) -> TrieResult<Vec<Vec<u8>>> {
-        let mut path = self.get_path_at(self.root.clone(), &Nibbles::from_raw(key, true))?;
-        match self.root {
-            Node::Empty => {}
-            _ => path.push(self.root.clone()),
-        }
-        Ok(path.into_iter().rev().map(|n| self.encode_raw(n)).collect())
-    }
-
-    /// return value if key exists, None if key not exist, Error if proof is wrong
-    pub fn verify_proof(
-        &self,
-        root_hash: H256,
-        key: &[u8],
-        proof: Vec<Vec<u8>>,
-    ) -> TrieResult<Option<Vec<u8>>> {
-        let mut memdb = MemoryDB::new(true);
-        for node_encoded in proof.into_iter() {
-            let hash = keccak256(&node_encoded);
-
-            if root_hash.eq(&hash) || node_encoded.len() >= HASH_LEN {
-                memdb.insert(hash, node_encoded);
-            }
-        }
-        let trie = PatriciaTrie::from(&mut memdb, root_hash).or(Err(TrieError::InvalidProof))?;
-        trie.get(key).or(Err(TrieError::InvalidProof))
-    }
-}
-
-impl<'db, D: HashDB> PatriciaTrie<'db, D> {
     fn get_at(&self, n: Node, partial: &Nibbles) -> TrieResult<Option<Vec<u8>>> {
         match n {
             Node::Empty => Ok(None),
@@ -315,6 +263,145 @@ impl<'db, D: HashDB> PatriciaTrie<'db, D> {
         }
     }
 
+    /// Prove constructs a merkle proof for key. The result contains all encoded nodes
+    /// on the path to the value at key. The value itself is also included in the last
+    /// node and can be retrieved by verifying the proof.
+    ///
+    /// If the trie does not contain a value for key, the returned proof contains all
+    /// nodes of the longest existing prefix of the key (at least the root node), ending
+    /// with the node that proves the absence of the key.
+    pub fn get_proof(&self, key: &[u8]) -> TrieResult<Vec<Vec<u8>>> {
+        let mut path = self.get_path_at(self.root.clone(), &Nibbles::from_raw(key, true))?;
+        match self.root {
+            Node::Empty => {}
+            _ => path.push(self.root.clone()),
+        }
+        Ok(path.into_iter().rev().map(|n| self.encode_raw(n)).collect())
+    }
+
+    /// return value if key exists, None if key not exist, Error if proof is wrong
+    pub fn verify_proof(
+        &self,
+        root_hash: H256,
+        key: &[u8],
+        proof: Vec<Vec<u8>>,
+    ) -> TrieResult<Option<Vec<u8>>> {
+        let mut memdb = MemoryDB::new(true);
+        for node_encoded in proof.into_iter() {
+            let hash = keccak256(&node_encoded);
+
+            if root_hash.eq(&hash) || node_encoded.len() >= HASH_LEN {
+                memdb.insert(hash, node_encoded);
+            }
+        }
+        let trie = PatriciaTrieMut::from(&mut memdb, root_hash).or(Err(TrieError::InvalidProof))?;
+        trie.get(key).or(Err(TrieError::InvalidProof))
+    }
+}
+
+impl<'a, 'db: 'a, D: HashDB> From<&'a PatriciaTrieMut<'db, D>> for PatriciaTrie<'a, D> {
+    fn from(trie: &'a PatriciaTrieMut<'db, D>) -> Self {
+        trie.trie_ref()
+    }
+}
+
+impl<'db, D: HashDB> PatriciaTrieMut<'db, D> {
+    pub fn hashdb_mut(&mut self) -> &mut D {
+        self.hashdb
+    }
+
+    pub fn hashdb(&self) -> &D {
+        self.hashdb
+    }
+
+    pub fn iter(&self) -> TrieIterator<D> {
+        let trie: PatriciaTrie<D> = self.into();
+        trie.iter()
+    }
+
+    pub fn new(db: &'db mut D) -> Self {
+        Self {
+            root: Node::Empty,
+            cache: Rc::new(RefCell::new(HashMap::new())),
+            passing_keys: HashSet::new(),
+            gen_keys: Rc::new(RefCell::new(HashSet::new())),
+            hashdb: db,
+        }
+    }
+
+    pub fn from(db: &'db mut D, root: H256) -> TrieResult<Self> {
+        match db.get(&root) {
+            Some(data) => {
+                let mut trie = Self {
+                    root: Node::Empty,
+                    cache: Rc::new(RefCell::new(HashMap::new())),
+                    passing_keys: HashSet::new(),
+                    gen_keys: Rc::new(RefCell::new(HashSet::new())),
+                    hashdb: db,
+                };
+
+                trie.root = trie.decode_node(&data)?;
+                Ok(trie)
+            }
+            None => Err(TrieError::InvalidStateRoot),
+        }
+    }
+
+    /// Returns the value for key stored in the trie.
+    pub fn get(&self, key: &[u8]) -> TrieResult<Option<Vec<u8>>> {
+        self.trie_ref().get(key)
+    }
+
+    /// Checks that the key is present in the trie
+    pub fn contains(&self, key: &[u8]) -> TrieResult<bool> {
+        self.trie_ref().contains(key)
+    }
+
+    pub fn get_proof(&self, key: &[u8]) -> TrieResult<Vec<Vec<u8>>> {
+        self.trie_ref().get_proof(key)
+    }
+
+    /// return value if key exists, None if key not exist, Error if proof is wrong
+    pub fn verify_proof(
+        &self,
+        root_hash: H256,
+        key: &[u8],
+        proof: Vec<Vec<u8>>,
+    ) -> TrieResult<Option<Vec<u8>>> {
+        self.trie_ref().verify_proof(root_hash, key, proof)
+    }
+
+    fn trie_ref(&self) -> PatriciaTrie<D> {
+        PatriciaTrie {
+            root: self.root.clone(),
+            hashdb: self.hashdb(),
+            cache: self.cache.clone(),
+            gen_keys: self.gen_keys.clone(),
+        }
+    }
+}
+
+impl<'db, D: HashDB> PatriciaTrieMut<'db, D> {
+    /// Inserts value into trie and modifies it if it exists
+    pub fn insert(&mut self, key: &[u8], value: Vec<u8>) -> TrieResult<()> {
+        if value.is_empty() {
+            self.remove(key)?;
+            return Ok(());
+        }
+        let root = self.root.clone();
+        self.root = self.insert_at(root, Nibbles::from_raw(key, true), value)?;
+        Ok(())
+    }
+
+    /// Removes any existing value for key from the trie.
+    pub fn remove(&mut self, key: &[u8]) -> TrieResult<bool> {
+        let (n, removed) = self.delete_at(self.root.clone(), &Nibbles::from_raw(key, true))?;
+        self.root = n;
+        Ok(removed)
+    }
+}
+
+impl<'db, D: HashDB> PatriciaTrieMut<'db, D> {
     fn insert_at(&mut self, n: Node, partial: Nibbles, value: Vec<u8>) -> TrieResult<Node> {
         match n {
             Node::Empty => Ok(Node::from_leaf(partial, value)),
@@ -537,6 +624,55 @@ impl<'db, D: HashDB> PatriciaTrie<'db, D> {
         }
     }
 
+    /// Saves all the nodes in the db, clears the cache data, recalculates the root.
+    /// Returns the root hash of the trie.
+    pub fn root(&mut self) -> TrieResult<H256> {
+        let encoded = self.encode_node(self.root.clone());
+        let root_hash = match encoded {
+            RawNodeOrHash::Node(raw) => {
+                let hash = keccak256(&raw);
+                self.cache.borrow_mut().insert(hash.clone(), raw);
+                hash
+            }
+            RawNodeOrHash::Hash(hash) => hash,
+        };
+
+        for (k, v) in self.cache.borrow_mut().drain() {
+            self.hashdb.insert(k, v);
+        }
+
+        let removed_keys: Vec<H256> = self
+            .passing_keys
+            .iter()
+            .filter(|h| !self.gen_keys.borrow().contains(h))
+            .map(|h| *h)
+            .collect();
+
+        self.hashdb.remove_batch(&removed_keys);
+
+        self.gen_keys.borrow_mut().clear();
+        self.passing_keys.clear();
+        self.root = self.recover_from_db(&root_hash)?;
+        Ok(root_hash)
+    }
+
+    fn encode_node(&self, n: Node) -> RawNodeOrHash {
+        let trie: PatriciaTrie<D> = self.into();
+        trie.encode_node(n)
+    }
+
+    fn decode_node(&self, data: &[u8]) -> TrieResult<Node> {
+        let trie: PatriciaTrie<D> = self.into();
+        trie.decode_node(data)
+    }
+
+    fn recover_from_db(&self, key: &H256) -> TrieResult<Node> {
+        let trie: PatriciaTrie<D> = self.into();
+        trie.recover_from_db(key)
+    }
+}
+
+impl<'db, D: HashDB> PatriciaTrie<'db, D> {
     // Get nodes path along the key, only the nodes whose encode length is greater than
     // hash length are added.
     // For embedded nodes whose data are already contained in their parent node, we don't need to
@@ -577,37 +713,11 @@ impl<'db, D: HashDB> PatriciaTrie<'db, D> {
         }
     }
 
-    /// Saves all the nodes in the db, clears the cache data, recalculates the root.
-    /// Returns the root hash of the trie.
-    pub fn root(&mut self) -> TrieResult<H256> {
-        let encoded = self.encode_node(self.root.clone());
-        let root_hash = match encoded {
-            RawNodeOrHash::Node(raw) => {
-                let hash = keccak256(&raw);
-                self.cache.get_mut().insert(hash.clone(), raw);
-                hash
-            }
-            RawNodeOrHash::Hash(hash) => hash,
-        };
-
-        for (k, v) in self.cache.get_mut().drain() {
-            self.hashdb.insert(k, v);
+    fn recover_from_db(&self, key: &H256) -> TrieResult<Node> {
+        match self.hashdb.get(key) {
+            Some(value) => Ok(self.decode_node(&value)?),
+            None => Ok(Node::Empty),
         }
-
-        let removed_keys: Vec<H256> = self
-            .passing_keys
-            .iter()
-            .filter(|h| !self.gen_keys.borrow().contains(h))
-            .map(|h| *h)
-            .collect();
-
-        self.hashdb.remove_batch(&removed_keys);
-
-        self.root_hash = root_hash;
-        self.gen_keys.get_mut().clear();
-        self.passing_keys.clear();
-        self.root = self.recover_from_db(&root_hash)?;
-        Ok(root_hash)
     }
 
     fn encode_node(&self, n: Node) -> RawNodeOrHash {
@@ -720,13 +830,6 @@ impl<'db, D: HashDB> PatriciaTrie<'db, D> {
                     Err(TrieError::InvalidData)
                 }
             }
-        }
-    }
-
-    fn recover_from_db(&self, key: &H256) -> TrieResult<Node> {
-        match self.hashdb.get(key) {
-            Some(value) => Ok(self.decode_node(&value)?),
-            None => Ok(Node::Empty),
         }
     }
 }

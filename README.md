@@ -13,20 +13,20 @@ The implementation is forked from [cita-trie](https://crates.io/crates/cita_trie
 ## Example
 
 ```rust
-use ethtrie::{TrieDB, MemoryDB, keccak256};
+use ethtrie::{TrieDBMut, MemoryDB, keccak256};
 fn main() {
     let mut memdb = MemoryDB::new(true);
     let key = keccak256(b"test-key");
     let value = b"test-value";
     let root = {
-        let mut trie = TrieDB::new(&mut memdb);
+        let mut trie = TrieDBMut::new(&mut memdb);
         trie.insert(&key, value.to_vec()).unwrap();
         let v = trie.get(&key).unwrap();
         assert_eq!(Some(value.to_vec()), v);
         trie.root().unwrap()
     };
     
-    let mut trie = TrieDB::from(&mut memdb, root).unwrap();
+    let mut trie = TrieDBMut::from(&mut memdb, root).unwrap();
     let exists = trie.contains(&key).unwrap();
     assert_eq!(exists, true);
     let removed = trie.remove(&key).unwrap();
